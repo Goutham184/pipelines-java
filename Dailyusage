@@ -22,19 +22,12 @@ AzureDiagnostics
 | where Category == "PostgreSQLSessions"
 | summarize SessionCount = count() by bin(TimeGenerated, 5m)
 
-
 AzureDiagnostics
 | where Category == "PostgreSQLLogs"
-| parse Message with Operation:string " " *
-| where Operation in~ ("select", "insert", "update", "delete", "create", "alter", "drop")
-| summarize QueryCount = count() by Operation, bin(TimeGenerated, 1m)
+| where Message has "duration:" and Message has "statement:"
+| extend DurationMs = todouble(extract("duration: ([0-9.]+)", 1, Message))
+| extend StatementPart = extract("statement: (.*)", 1, Message)
+| extend Operation = tostring(split(trim(" ", StatementPart), " ")[0])
+| where DurationMs > 5000
+| summarize LongRunningCount = count() by Operation, bin(TimeGenerated, 1m)
 | order by TimeGenerated desc
-
-AzureDiagnostics
-| where Category == "PostgreSQLLogs"
-| where Message startswith "statement:"
-| extend SqlText = tolower(trim_start("statement: ", Message))
-| extend Operation = extract("^(\\w+)", 1, SqlText)
-| summarize QueriesPerMinute = count() by Operation, bin(TimeGenerated, 1m)
-| order by TimeGenerated desc
-
