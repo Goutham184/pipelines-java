@@ -22,12 +22,13 @@ AzureDiagnostics
 | where Category == "PostgreSQLSessions"
 | summarize SessionCount = count() by bin(TimeGenerated, 5m)
 
+
 AzureDiagnostics
 | where Category == "PostgreSQLLogs"
-| where Message has "duration:" and Message has "statement:"
-| extend DurationMs = todouble(extract("duration: ([0-9.]+)", 1, Message))
-| extend StatementPart = extract("statement: (.*)", 1, Message)
-| extend Operation = tostring(split(trim(" ", StatementPart), " ")[0])
-| where DurationMs > 5000
-| summarize LongRunningCount = count() by Operation, bin(TimeGenerated, 1m)
+| where Message startswith "duration:"
+| extend DurationMs = todouble(extract(@"duration: ([0-9\.]+)", 1, Message))
+| extend Statement = extract(@"statement: (.*)", 1, Message)
+| extend Operation = tostring(split(trim(" ", Statement), " ")[0])
+| where isnotempty(Operation) and DurationMs > 5000
+| summarize LongRunningQueryCount = count() by Operation, bin(TimeGenerated, 1m)
 | order by TimeGenerated desc
