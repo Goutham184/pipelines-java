@@ -1,6 +1,32 @@
-az monitor diagnostic-settings create \
-  --name "pg-monitoring" \
-  --resource "/subscriptions/xxxx-xxxx-xxxx/resourceGroups/my-rg/providers/Microsoft.DBforPostgreSQL/flexibleServers/my-flex-server" \
-  --workspace "/subscriptions/xxxx-xxxx-xxxx/resourceGroups/monitoring-rg/providers/Microsoft.OperationalInsights/workspaces/my-workspace" \
-  --logs '[{"category": "PostgreSQLLogs", "enabled": true}, {"category": "QueryStoreRuntimeStatistics", "enabled": true}, {"category": "QueryStoreWaitStatistics", "enabled": true}, {"category": "PostgreSQLSessions", "enabled": true}]' \
-  --metrics '[{"category": "AllMetrics", "enabled": true}]'
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| where Message has "duration:"
+| parse Message with * "duration: " duration:double " ms" *
+| where duration > 1000
+| project TimeGenerated, duration, Message
+| sort by duration desc
+
+
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| where Message has "deadlock detected"
+| project TimeGenerated, Message
+
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| parse Message with Operation:string " " *
+| where Operation in ("select", "insert", "update", "delete")
+| summarize QueryCount = count() by Operation, bin(TimeGenerated, 1m)
+
+AzureDiagnostics
+| where Category == "PostgreSQLSessions"
+| summarize SessionCount = count() by bin(TimeGenerated, 5m)
+
+
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| parse Message with Operation:string " " *
+| where Operation in~ ("select", "insert", "update", "delete", "create", "alter", "drop")
+| summarize QueryCount = count() by Operation, bin(TimeGenerated, 1m)
+| order by TimeGenerated desc
+
