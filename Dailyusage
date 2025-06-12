@@ -30,3 +30,11 @@ AzureDiagnostics
 | summarize QueryCount = count() by Operation, bin(TimeGenerated, 1m)
 | order by TimeGenerated desc
 
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| where Message startswith "statement:"
+| extend SqlText = tolower(trim_start("statement: ", Message))
+| extend Operation = extract("^(\\w+)", 1, SqlText)
+| summarize QueriesPerMinute = count() by Operation, bin(TimeGenerated, 1m)
+| order by TimeGenerated desc
+
