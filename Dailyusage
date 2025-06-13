@@ -50,3 +50,19 @@ AzureDiagnostics
 | where QueryType != "UNKNOWN"
 | summarize QueriesPerMinute = count() by bin(TimeGenerated, 1m), QueryType
 | order by TimeGenerated desc
+
+
+
+let logs = AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| where isnotempty(Message)
+| extend QueryType = extract(@"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b", 1, Message)
+| extend QueryType = iif(isempty(QueryType), "OTHER", QueryType)
+| project TimeGenerated, QueryType;
+
+logs
+| summarize Count = count() by bin(TimeGenerated, 1m), QueryType
+| join kind=inner (
+    logs
+    | summarize TotalCount = count() by QueryType
+) on QueryType
