@@ -32,3 +32,21 @@ AzureDiagnostics
 | where isnotempty(Operation) and DurationMs > 5000
 | summarize LongRunningQueryCount = count() by Operation, bin(TimeGenerated, 1m)
 | order by TimeGenerated desc
+
+AzureDiagnostics
+| where Category == "PostgreSQLLogs"
+| where isnotempty(Message)
+| extend QueryType =
+    case(
+        Message has "SELECT", "SELECT",
+        Message has "INSERT", "INSERT",
+        Message has "UPDATE", "UPDATE",
+        Message has "DELETE", "DELETE",
+        Message has "CREATE", "CREATE",
+        Message has "DROP",   "DROP",
+        Message has "ALTER",  "ALTER",
+        "UNKNOWN"
+    )
+| where QueryType != "UNKNOWN"
+| summarize QueriesPerMinute = count() by bin(TimeGenerated, 1m), QueryType
+| order by TimeGenerated desc
