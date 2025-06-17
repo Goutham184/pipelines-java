@@ -66,3 +66,79 @@ logs
     logs
     | summarize TotalCount = count() by QueryType
 ) on QueryType
+
+
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "monitorWorkspaceName": { "type": "string" },
+    "location": { "type": "string" },
+    "ruleName": { "type": "string" },
+    "actionGroupId": { "type": "string" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Monitor/accounts/prometheusRules",
+      "apiVersion": "2023-11-01-preview",
+      "name": "[format('{0}/{1}', parameters('monitorWorkspaceName'), parameters('ruleName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "description": "Alert for high HTTP 5xx error rate > 1%",
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Monitor/accounts', parameters('monitorWorkspaceName'))]"
+        ],
+        "severity": 2,
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "criteria": {
+          "type": "Microsoft.PrometheusRule.Alerting",
+          "name": "HighErrorRate",
+          "expression": "sum(rate(http_server_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_server_requests_total[5m])) > 0.01",
+          "duration": "PT5M",
+          "labels": {
+            "severity": "critical"
+          },
+          "annotations": {
+            "summary": "High error rate > 1% for 5 minutes",
+            "description": "This alert fires when the error rate exceeds 1% over the last 5 minutes."
+          }
+        },
+        "actions": {
+          "actionGroups": [
+            {
+              "actionGroupId": "[parameters('actionGroupId')]"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "monitorWorkspaceName": {
+      "value": "<MONITOR_WORKSPACE_NAME>"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "ruleName": {
+      "value": "high-error-rate-alert"
+    },
+    "actionGroupId": {
+      "value": "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/microsoft.insights/actionGroups/<ACTION_GROUP_NAME>"
+    }
+  }
+}
+az deployment group create \
+  --resource-group <RESOURCE_GROUP> \
+  --template-file prometheus-alert-rule-template.json \
+  --parameters @prometheus-alert-rule-parameters.json
+
+
+
+
