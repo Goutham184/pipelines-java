@@ -148,5 +148,80 @@ az deployment group create \
   --parameters @prometheus-alert-rule-parameters.json
 
 
+pg_stat_activity_long:
+  query: |
+    SELECT
+      pid,
+      now() - query_start AS duration_seconds,
+      query,
+      state,
+      datname
+    FROM pg_stat_activity
+    WHERE state = 'active' AND now() - query_start > interval '5 seconds';
+  metrics:
+    - duration_seconds:
+        usage: "GAUGE"
+        description: "Duration a query has been running"
+        labels:
+          - pid
+          - query
+          - state
+          - datname
+
+pg_stat_statements_by_operation:
+  query: |
+    SELECT
+      upper(split_part(trim(query), ' ', 1)) AS operation,
+      count(*) AS count
+    FROM pg_stat_statements
+    GROUP BY operation;
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Count of queries by SQL operation (SELECT, INSERT, etc.)"
+        labels:
+          - operation
+
+pg_locks_blocked:
+  query: |
+    SELECT
+      mode,
+      count(*) AS count
+    FROM pg_locks
+    WHERE granted = false
+    GROUP BY mode;
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of blocked locks (possible deadlocks)"
+        labels:
+          - mode
+
+pg_deadlocks_total:
+  query: |
+    SELECT
+      datname,
+      deadlocks AS deadlocks_total
+    FROM pg_stat_database;
+  metrics:
+    - deadlocks_total:
+        usage: "COUNTER"
+        description: "Total number of deadlocks per database"
+        labels:
+          - datname
+
+pg_avg_session_count:
+  query: |
+    SELECT
+      datname,
+      count(*) AS session_count
+    FROM pg_stat_activity
+    GROUP BY datname;
+  metrics:
+    - session_count:
+        usage: "GAUGE"
+        description: "Current session count per database"
+        labels:
+          - datname
 
 
