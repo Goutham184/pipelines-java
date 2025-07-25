@@ -1,3 +1,12 @@
+az monitor diagnostic-settings create \
+  --name grafana-diagnostic-settings \
+  --resource <GRAFANA_RESOURCE_ID> \
+  --workspace <LOG_ANALYTICS_WORKSPACE_ID> \
+  --logs '[{"category": "GrafanaLogs", "enabled": true}]' \
+  --metrics '[{"category": "AllMetrics", "enabled": true}]'
+
+
+
 AzureDiagnostics
 | where Category == "PostgreSQLLogs"
 | where Message has "duration:"
