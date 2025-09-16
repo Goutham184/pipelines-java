@@ -234,3 +234,9 @@ pg_avg_session_count:
           - datname
 
 
+kubectl patch configmap vault-ledger-balances-config-vault-core-ledger-balances \
+  -n tm-vault \
+  --type merge \
+  -p '{"data":{"config.yaml":"global_watermark_publication_interval: 1m\nglobal_watermark_publication_max_attempts: 3\nbucket_processor_heartbeat_publication_interval: 5s\nbucket_processor_heartbeat_publication_max_attempts: 10\nestimation_band: 2m"}}'
+
+
