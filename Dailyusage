@@ -240,3 +240,23 @@ kubectl patch configmap vault-ledger-balances-config-vault-core-ledger-balances 
   -p '{"data":{"config.yaml":"global_watermark_publication_interval: 1m\nglobal_watermark_publication_max_attempts: 3\nbucket_processor_heartbeat_publication_interval: 5s\nbucket_processor_heartbeat_publication_max_attempts: 10\nestimation_band: 2m"}}'
 
 
+# 3️⃣ Create Project Access Token
+echo "🔐 Creating project access token for '$PROJECT_NAME'..."
+PAT_RESPONSE=$(curl -s --request POST "$GITLAB_URL/api/v4/projects/$PROJECT_ID/access_tokens" \
+  --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  --form "name=${PROJECT_NAME}_token" \
+  --form "scopes[]=api" \
+  --form "scopes[]=read_repository" \
+  --form "scopes[]=write_repository" \
+  --form "expires_at=$(date -d '+30 days' +%Y-%m-%d)")
+
+PROJECT_PAT=$(echo "$PAT_RESPONSE" | jq -r '.token')
+
+if [[ "$PROJECT_PAT" == "null" || -z "$PROJECT_PAT" ]]; then
+  echo "❌ ERROR: Failed to create project access token. Response:"
+  echo "$PAT_RESPONSE"
+  exit 1
+fi
+
+echo "✅ Project Access Token created successfully."
+echo "🔑 Token: $PROJECT_PAT"
