@@ -61,3 +61,23 @@ echo "✅ Branches created: ${BRANCHES[*]}"
 # 4️⃣ Output repository URL
 REPO_URL=$(echo "$PROJECT_RESPONSE" | jq -r '.http_url_to_repo')
 echo "🎯 Repository URL: $REPO_URL"
+
+
+##for dynamically getting foldernames or dbnames in deploy job
+deploy:
+  stage: deploy
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - configs/**/app-*.properties
+  script:
+    - |
+      git diff --name-only "$CI_COMMIT_BEFORE_SHA" "$CI_COMMIT_SHA" \
+        | awk -F/ '/configs/ {print $2}' \
+        | sort -u > dbs.txt
+
+      while read db; do
+        echo "Deploying for DB: $db"
+        ./deploy.sh "$db"
+      done < dbs.txt
+
