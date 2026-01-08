@@ -1,0 +1,58 @@
+# ci-templates/deployment-manifest.yml
+
+.deploy_with_manifest:
+  script:
+    - |
+      cat > deployment.json <<EOF
+      {
+        "service": "$SERVICE_NAME",
+        "environment": "$ENVIRONMENT",
+        "image": "$CI_REGISTRY_IMAGE:$IMAGE_TAG",
+        "branch": "$CI_COMMIT_REF_NAME",
+        "commit": "$CI_COMMIT_SHA",
+        "pipelineId": $CI_PIPELINE_ID,
+        "pipelineUrl": "$CI_PIPELINE_URL",
+        "jobId": $CI_JOB_ID,
+        "jobUrl": "$CI_JOB_URL",
+        "chart": "$HELM_CHART",
+        "chartVersion": "$HELM_CHART_VERSION",
+        "helmRelease": "$HELM_RELEASE",
+        "namespace": "$K8S_NAMESPACE",
+        "cluster": "$K8S_CLUSTER",
+        "deployedBy": "$GITLAB_USER_LOGIN",
+        "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      }
+      EOF
+
+    - git clone https://oauth2:${DEPLOY_TOKEN}@gitlab.com/org/infra-deployments.git
+    - mkdir -p infra-deployments/$SERVICE_NAME
+    - mv deployment.json infra-deployments/$SERVICE_NAME/$ENVIRONMENT.json
+    - cd infra-deployments
+    - git add .
+    - git commit -m "$SERVICE_NAME → $ENVIRONMENT ($CI_COMMIT_SHORT_SHA)"
+    - git push
+
+
+include:
+  - project: org/ci-templates
+    ref: main
+    file: deployment-manifest.yml
+    
+
+deploy:qa:
+  stage: deploy
+  variables:
+    SERVICE_NAME: payments
+    ENVIRONMENT: qa
+    IMAGE_TAG: "$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA"
+    HELM_CHART: payments
+    HELM_CHART_VERSION: "1.4.2"
+    HELM_RELEASE: payments
+    K8S_NAMESPACE: payments-qa
+    K8S_CLUSTER: aks-core
+  script:
+    - helm upgrade --install payments ./helm \
+        --set image.tag=$IMAGE_TAG
+  extends: .deploy_with_manifest
+  
+
