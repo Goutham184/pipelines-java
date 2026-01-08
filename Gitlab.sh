@@ -81,3 +81,12 @@ deploy:
         ./deploy.sh "$db"
       done < dbs.txt
 
+pages:
+  stage: deploy
+  script:
+    - mkdir public
+    - cp index.html script.js public/
+  artifacts:
+    paths:
+      - public
+
