@@ -1,0 +1,29 @@
+#!/bin/bash
+
+DEV_FILE="app-dev.properties"
+TARGET_FILES=("app-uat.properties" "app-prod.properties")
+
+for TARGET in "${TARGET_FILES[@]}"; do
+  # If target does not exist, copy fully
+  if [[ ! -f "$TARGET" ]]; then
+    echo "Creating $TARGET from $DEV_FILE"
+    cp "$DEV_FILE" "$TARGET"
+    continue
+  fi
+
+  echo "Syncing new properties from $DEV_FILE → $TARGET"
+
+  while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+    KEY="${line%%=*}"
+
+    # Check if key already exists
+    if ! grep -qE "^${KEY}=" "$TARGET"; then
+      echo "$line" >> "$TARGET"
+      echo "  ➕ Added $KEY to $TARGET"
+    fi
+  done < "$DEV_FILE"
+
+done
