@@ -1,107 +1,86 @@
 #!/bin/bash
-set -euo pipefail
 
-fail() {
-  echo "[ERROR] $1"
-  exit 1
+DEV_FILE="app.dev.properties"
+UAT_FILE="app.uat.properties"
+PROD_FILE="app.prod.properties"
+
+# Function to parse properties file into associative array (keys and values)
+# Ignores comments (#) and empty lines, handles simple key=value (no spaces around = for simplicity)
+declare -A dev_props
+parse_props() {
+    local file="$1"
+    local -n assoc="$2"
+    while IFS='=' read -r key value; do
+        key=$(echo "$key" | xargs)  # trim leading/trailing spaces
+        if [[ -n "$key" && ! "$key" =~ ^[[:space:]]*# && ! "$key" =~ ^[[:space:]]*$ ]]; then
+            value="${value//[$'\t
+']}"  # trim value, remove newlines/tabs
+            assoc["$key"]="$value"
+        fi
+    done < "$file"
 }
 
-log() {
-  echo "[SYNC] $1"
-}
+# Check if dev file exists
+if [[ ! -f "$DEV_FILE" ]]; then
+    echo "Error: $DEV_FILE not found."
+    exit 1
+fi
 
-validate_dev_file() {
-  local file="$1"
+parse_props "$DEV_FILE" dev_props
 
-  log "Validating $file"
+# Process UAT
+if [[ ! -f "$UAT_FILE" ]]; then
+    echo "# Synced from $DEV_FILE on $(date)" > "$UAT_FILE"
+    for key in "${!dev_props[@]}"; do
+        echo "$key=${dev_props[$key]}" >> "$UAT_FILE"
+    done
+    echo "Created $UAT_FILE"
+else
+    # Parse existing UAT
+    declare -A uat_props
+    parse_props "$UAT_FILE" uat_props
+    
+    # Remove keys from UAT not in dev
+    for key in "${!uat_props[@]}"; do
+        if [[ -z "${dev_props[$key]}" ]]; then
+            sed -i "/^$key=/d" "$UAT_FILE"  # assumes no spaces before key, adjust if needed
+        fi
+    done
+    
+    # Add/Update keys from dev
+    for key in "${!dev_props[@]}"; do
+        if [[ -z "${uat_props[$key]}" ]]; then
+            echo "$key=${dev_props[$key]}" >> "$UAT_FILE"
+        else
+            sed -i "s/^$key=.*/$key=${dev_props[$key]}/" "$UAT_FILE"
+        fi
+    done
+    echo "Updated $UAT_FILE"
+fi
 
-  # 1. No empty lines
-  if grep -n '^$' "$file" >/dev/null; then
-    fail "$file contains empty lines"
-  fi
-
-  # 2. No commented lines
-  if grep -n '^[[:space:]]*#' "$file" >/dev/null; then
-    fail "$file contains commented lines"
-  fi
-
-  # 3. No leading/trailing spaces
-  if grep -n '^[[:space:]]\|[[:space:]]$' "$file" >/dev/null; then
-    fail "$file contains leading or trailing spaces"
-  fi
-
-  # 4. Must be strict key=value
-  if grep -n -v '^[^=[:space:]]\+=[^[:space:]]\+$' "$file" >/dev/null; then
-    fail "$file has invalid key=value format"
-  fi
-
-  # 5. Keys must not contain '='
-  if awk -F= '{ if ($1 ~ /=/) exit 1 }' "$file"; then :; else
-    fail "$file has invalid key containing '='"
-  fi
-
-  # 6. No duplicate keys
-  if awk -F= '{print $1}' "$file" | sort | uniq -d | grep . >/dev/null; then
-    fail "$file contains duplicate keys"
-  fi
-
-  # 7. No multiline values
-  if awk -F= 'NF != 2 { exit 1 }' "$file"; then :; else
-    fail "$file contains multiline or malformed values"
-  fi
-
-  log "$file validation PASSED"
-}
-
-# ---------------- MAIN ----------------
-
-for DEV_FILE in *.dev.properties; do
-  [[ -e "$DEV_FILE" ]] || continue
-
-  validate_dev_file "$DEV_FILE"
-
-  BASE_NAME="${DEV_FILE%.dev.properties}"
-
-  for ENV in uat prod; do
-    TARGET_FILE="${BASE_NAME}.${ENV}.properties"
-
-    # First run → copy
-    if [[ ! -f "$TARGET_FILE" ]]; then
-      log "Creating $TARGET_FILE"
-      cp "$DEV_FILE" "$TARGET_FILE"
-      continue
-    fi
-
-    log "Syncing keys with $TARGET_FILE"
-
-    # Ensure newline at EOF
-    [[ "$(tail -c1 "$TARGET_FILE")" == $'\n' ]] || echo >> "$TARGET_FILE"
-
-    # Extract DEV keys
-    DEV_KEYS=$(cut -d= -f1 "$DEV_FILE")
-
-    # ADD missing keys
-    while IFS= read -r line; do
-      KEY="${line%%=*}"
-
-      if ! grep -q "^${KEY}=" "$TARGET_FILE"; then
-        printf '%s\n' "$line" >> "$TARGET_FILE"
-        log "➕ Added $KEY to $TARGET_FILE"
-      fi
-    done < "$DEV_FILE"
-
-    # REMOVE extra keys
-    while IFS= read -r tline; do
-      TKEY="${tline%%=*}"
-
-      if ! grep -qx "$TKEY" <<< "$DEV_KEYS"; then
-        sed -i.bak "/^${TKEY}=/d" "$TARGET_FILE"
-        log "➖ Removed $TKEY from $TARGET_FILE"
-      fi
-    done < "$TARGET_FILE"
-
-    rm -f "${TARGET_FILE}.bak"
-  done
-done
-
-log "SYNC COMPLETED SUCCESSFULLY"
+# Process PROD (same logic)
+if [[ ! -f "$PROD_FILE" ]]; then
+    echo "# Synced from $DEV_FILE on $(date)" > "$PROD_FILE"
+    for key in "${!dev_props[@]}"; do
+        echo "$key=${dev_props[$key]}" >> "$PROD_FILE"
+    done
+    echo "Created $PROD_FILE"
+else
+    declare -A prod_props
+    parse_props "$PROD_FILE" prod_props
+    
+    for key in "${!prod_props[@]}"; do
+        if [[ -z "${dev_props[$key]}" ]]; then
+            sed -i "/^$key=/d" "$PROD_FILE"
+        fi
+    done
+    
+    for key in "${!dev_props[@]}"; do
+        if [[ -z "${prod_props[$key]}" ]]; then
+            echo "$key=${dev_props[$key]}" >> "$PROD_FILE"
+        else
+            sed -i "s/^$key=.*/$key=${dev_props[$key]}/" "$PROD_FILE"
+        fi
+    done
+    echo "Updated $PROD_FILE"
+fi
