@@ -26,4 +26,40 @@ fi
 
 # Duplicate keys
 if cut -d= -f1 "$SRC" | sort | uniq -d | grep -q .; then
-  echo
+  echo "ERROR: Duplicate keys found in $SRC"
+  cut -d= -f1 "$SRC" | sort | uniq -d
+  exit 1
+fi
+
+echo "✔ DEV validation passed"
+
+### -------------------------------
+### 2️⃣ Sync targets
+### -------------------------------
+for TARGET in "${TARGETS[@]}"; do
+  echo "Processing $TARGET"
+
+  # Create if missing
+  if [[ ! -f "$TARGET" ]]; then
+    cp "$SRC" "$TARGET"
+    echo "  Created $TARGET"
+    continue
+  fi
+
+  TMP="$(mktemp)"
+
+  while IFS='=' read -r key dev_value; do
+    if grep -q "^${key}=" "$TARGET"; then
+      # Keep existing target value
+      grep "^${key}=" "$TARGET" >> "$TMP"
+    else
+      # New key → copy from dev
+      echo "${key}=${dev_value}" >> "$TMP"
+    fi
+  done < "$SRC"
+
+  mv "$TMP" "$TARGET"
+  echo "  Synced $TARGET"
+done
+
+echo "✔ Sync complete"
