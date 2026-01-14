@@ -1,89 +1,50 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# ---------------- CONFIG ----------------
-SOURCE_DIR="/opt/config/source"   # where *.dev.properties live
-TARGET_DIR="$DB_NAME"             # target directory (external variable)
-ENVS=("dev" "qa" "uat" "prod")
-# ----------------------------------------
-
-[[ -d "$SOURCE_DIR" ]] || { echo "ERROR: SOURCE_DIR not found: $SOURCE_DIR"; exit 1; }
-[[ -n "${TARGET_DIR:-}" ]] || { echo "ERROR: DB_NAME is not set"; exit 1; }
-
-mkdir -p "$TARGET_DIR"
-
-shopt -s nullglob
-DEV_FILES=("$SOURCE_DIR"/*.dev.properties)
-
-[[ ${#DEV_FILES[@]} -gt 0 ]] || {
-  echo "ERROR: No *.dev.properties files found in $SOURCE_DIR"
-  exit 1
-}
-
-for SOURCE_FILE in "${DEV_FILES[@]}"; do
-  BASENAME="$(basename "$SOURCE_FILE")"
-  PREFIX="${BASENAME%.dev.properties}"
-
-  echo "Processing source: $BASENAME"
-
-  # -------- VALIDATE DEV FILE --------
-  awk '
-    /^[[:space:]]*$/ {
-      print "ERROR: Empty line in " FILENAME
-      exit 1
+awk -F= -v ENV="$ENV" '
+  NR==FNR {
+    if ($0 !~ /^[[:space:]]*#/) {
+      dev[$1]=$2
+      order[++n]=$1
     }
-    /^[[:space:]]*#/ { next }
-    !/^[^=[:space:]]+=[[:print:]]*$/ {
-      print "ERROR: Invalid key=value -> " $0
-      exit 1
+    next
+  }
+
+  {
+    lines[NR]=$0
+    keys[NR]=$1
+    values[NR]=$2
+
+    # detect TODO comment
+    if ($0 ~ /^# TODO: Change this property as per/) {
+      todo_line[NR]=1
     }
-  ' "$SOURCE_FILE"
 
-  # -------- SYNC ALL ENVS --------
-  for ENV in "${ENVS[@]}"; do
-    TARGET="$TARGET_DIR/${PREFIX}.${ENV}.properties"
-    echo "  → $TARGET"
+    # detect existing key=#value
+    if ($1 && $2 ~ /^#/) {
+      commented[$1]=1
+    }
 
-    # Create if missing
-    if [[ ! -f "$TARGET" ]]; then
-      awk '!/^[[:space:]]*#/' "$SOURCE_FILE" > "$TARGET"
-      echo "    Created"
-      continue
-    fi
+    target[$1]=$2
+    last_line=NR
+  }
 
-    TMP="$(mktemp)"
+  END {
+    for (i=1; i<=n; i++) {
+      k=order[i]
 
-    awk -F= '
-      NR==FNR {
-        if ($0 !~ /^[[:space:]]*#/) {
-          dev[$1]=$0
-          order[++n]=$1
-        }
-        next
+      # -------- unchanged --------
+      if (k in target && target[k] == dev[k]) {
+        print k "=" target[k]
+        continue
       }
-      {
-        target[$1]=$0
-      }
-      END {
-        for (i=1; i<=n; i++) {
-          k=order[i]
-          if (k in target)
-            print target[k]
-          else {
-            print dev[k]
-            print "    + Added:", k > "/dev/stderr"
-          }
-        }
-        for (k in target) {
-          if (!(k in dev))
-            print "    - Removed:", k > "/dev/stderr"
-        }
-      }
-    ' "$SOURCE_FILE" "$TARGET" > "$TMP"
 
-    mv "$TMP" "$TARGET"
-    echo "    Synced"
-  done
-done
+      # -------- already commented (idempotent) --------
+      if (k in commented) {
+        print k "=#" dev[k]
+        continue
+      }
 
-echo "✔ All dev property files processed successfully"
+      # -------- added or modified --------
+      print "# TODO: Change this property as per " toupper(ENV) " environment"
+      print k "=#" dev[k]
+    }
+  }
+' "$SOURCE_FILE" "$TARGET" > "$TMP"
