@@ -1,122 +1,89 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---- CONFIG ----
-ENVS=(uat prod)
-# ----------------
+# ---------------- CONFIG ----------------
+SOURCE_DIR="/opt/config/source"   # where *.dev.properties live
+TARGET_DIR="$DB_NAME"             # target directory (external variable)
+ENVS=("dev" "qa" "uat" "prod")
+# ----------------------------------------
 
-fail() {
-  echo "❌ $1"
+[[ -d "$SOURCE_DIR" ]] || { echo "ERROR: SOURCE_DIR not found: $SOURCE_DIR"; exit 1; }
+[[ -n "${TARGET_DIR:-}" ]] || { echo "ERROR: DB_NAME is not set"; exit 1; }
+
+mkdir -p "$TARGET_DIR"
+
+shopt -s nullglob
+DEV_FILES=("$SOURCE_DIR"/*.dev.properties)
+
+[[ ${#DEV_FILES[@]} -gt 0 ]] || {
+  echo "ERROR: No *.dev.properties files found in $SOURCE_DIR"
   exit 1
 }
 
-shopt -s nullglob
+for SOURCE_FILE in "${DEV_FILES[@]}"; do
+  BASENAME="$(basename "$SOURCE_FILE")"
+  PREFIX="${BASENAME%.dev.properties}"
 
-DEV_FILES=( *.dev.properties )
-[[ ${#DEV_FILES[@]} -gt 0 ]] || fail "No *.dev.properties files found"
+  echo "Processing source: $BASENAME"
 
-echo "🌍 Environments: ${ENVS[*]}"
-
-for DEV in "${DEV_FILES[@]}"; do
-  echo
-  echo "🔍 Validating $DEV"
-
-  #### DEV VALIDATION ####
+  # -------- VALIDATE DEV FILE --------
   awk '
-  /^[[:space:]]*$/ {
-    print "Empty line at line " NR
-    exit 1
-  }
-  /^[#;]/ { next }
-  /[[:space:]]/ {
-    print "Spaces are not allowed at line " NR ": " $0
-    exit 1
-  }
-  /=/ {
-    pos = index($0, "=")
-    if (pos == 1) {
-      print "Empty key at line " NR
+    /^[[:space:]]*$/ {
+      print "ERROR: Empty line in " FILENAME
       exit 1
     }
-    key = substr($0, 1, pos - 1)
-    if (index(key, "=")) {
-      print "Invalid key at line " NR
+    /^[[:space:]]*#/ { next }
+    !/^[^=[:space:]]+=[[:print:]]*$/ {
+      print "ERROR: Invalid key=value -> " $0
       exit 1
     }
-    if (seen[key]++) {
-      print "Duplicate key: " key
-      exit 1
-    }
-    next
-  }
-  {
-    print "Invalid line at " NR ": " $0
-    exit 1
-  }
-  ' "$DEV" || fail "Validation failed for $DEV"
+  ' "$SOURCE_FILE"
 
-  echo "✅ $DEV is valid"
-
+  # -------- SYNC ALL ENVS --------
   for ENV in "${ENVS[@]}"; do
-    TARGET="${DEV/.dev./.$ENV.}"
+    TARGET="$TARGET_DIR/${PREFIX}.${ENV}.properties"
+    echo "  → $TARGET"
 
-    echo
-    echo "🔄 Syncing $DEV → $TARGET"
-
-    #### CREATE TARGET IF MISSING ####
+    # Create if missing
     if [[ ! -f "$TARGET" ]]; then
-      awk '!/^[#;]/ {print}' "$DEV" > "$TARGET"
-      echo "✔ Created $TARGET"
+      awk '!/^[[:space:]]*#/' "$SOURCE_FILE" > "$TARGET"
+      echo "    Created"
       continue
     fi
 
     TMP="$(mktemp)"
 
-    #### SYNC ####
-    awk '
-    NR==FNR {
-      if ($0 ~ /^[#;]/) next
-      pos = index($0, "=")
-      k = substr($0, 1, pos - 1)
-      v = substr($0, pos + 1)
-      dev[k] = v
-      order[++n] = k
-      next
-    }
-    /^[#;]/ { next }
-    {
-      pos = index($0, "=")
-      k = substr($0, 1, pos - 1)
-      v = substr($0, pos + 1)
-      target[k] = v
-    }
-    END {
-      for (i = 1; i <= n; i++) {
-        k = order[i]
-        if (k in target) {
-          print k "=" target[k]
-          kept[k] = 1
-        } else {
-          print k "=" dev[k]
-          added[k] = 1
+    awk -F= '
+      NR==FNR {
+        if ($0 !~ /^[[:space:]]*#/) {
+          dev[$1]=$0
+          order[++n]=$1
+        }
+        next
+      }
+      {
+        target[$1]=$0
+      }
+      END {
+        for (i=1; i<=n; i++) {
+          k=order[i]
+          if (k in target)
+            print target[k]
+          else {
+            print dev[k]
+            print "    + Added:", k > "/dev/stderr"
+          }
+        }
+        for (k in target) {
+          if (!(k in dev))
+            print "    - Removed:", k > "/dev/stderr"
         }
       }
-
-      for (k in target)
-        if (!(k in dev))
-          removed[k] = 1
-
-      print "" > "/dev/stderr"
-      for (k in added)   print "➕ Added   : " k > "/dev/stderr"
-      for (k in removed) print "➖ Removed : " k > "/dev/stderr"
-      for (k in kept)    print "↺ Retained: " k > "/dev/stderr"
-    }
-    ' "$DEV" "$TARGET" > "$TMP"
+    ' "$SOURCE_FILE" "$TARGET" > "$TMP"
 
     mv "$TMP" "$TARGET"
-    echo "✔ Updated $TARGET"
+    echo "    Synced"
   done
 done
 
-echo
-echo "🎉 All *.dev.properties synced to environments: ${ENVS[*]}"
+echo "✔ All dev property files processed successfully"
