@@ -1,4 +1,5 @@
 awk -F= -v ENV="$ENV" '
+  # ---------- Read DEV ----------
   NR==FNR {
     if ($0 !~ /^[[:space:]]*#/) {
       dev[$1]=$2
@@ -7,44 +8,56 @@ awk -F= -v ENV="$ENV" '
     next
   }
 
+  # ---------- Read TARGET ----------
   {
-    lines[NR]=$0
-    keys[NR]=$1
-    values[NR]=$2
+    line[NR]=$0
+    key=$1
+    val=$2
 
-    # detect TODO comment
     if ($0 ~ /^# TODO: Change this property as per/) {
-      todo_line[NR]=1
+      todo_seen=1
+      next
     }
 
-    # detect existing key=#value
-    if ($1 && $2 ~ /^#/) {
-      commented[$1]=1
-    }
+    if (key != "") {
+      target[key]=val
+      rawline[key]=$0
 
-    target[$1]=$2
-    last_line=NR
+      # detect commented value (key=#value)
+      if (val ~ /^#/) {
+        commented[key]=1
+        frozen[key]=val   # preserve original commented value
+      }
+    }
   }
 
   END {
     for (i=1; i<=n; i++) {
       k=order[i]
 
-      # -------- unchanged --------
-      if (k in target && target[k] == dev[k]) {
-        print k "=" target[k]
+      # ---------- Case 1: already commented (DO NOT TOUCH) ----------
+      if (k in commented) {
+        print "# TODO: Change this property as per " toupper(ENV) " environment"
+        print k "=" frozen[k]
         continue
       }
 
-      # -------- already commented (idempotent) --------
-      if (k in commented) {
+      # ---------- Case 2: exists but value differs ----------
+      if (k in target && target[k] != dev[k]) {
+        print "# TODO: Change this property as per " toupper(ENV) " environment"
         print k "=#" dev[k]
         continue
       }
 
-      # -------- added or modified --------
-      print "# TODO: Change this property as per " toupper(ENV) " environment"
-      print k "=#" dev[k]
+      # ---------- Case 3: new key ----------
+      if (!(k in target)) {
+        print "# TODO: Change this property as per " toupper(ENV) " environment"
+        print k "=#" dev[k]
+        continue
+      }
+
+      # ---------- Case 4: unchanged ----------
+      print k "=" target[k]
     }
   }
 ' "$SOURCE_FILE" "$TARGET" > "$TMP"
