@@ -13,32 +13,40 @@ fail() {
 
 echo "🔍 Validating $DEV"
 
-awk -F= '
+awk '
 /^[[:space:]]*$/ {
   print "Empty line at line " NR
   exit 1
 }
+
 /^[#;]/ { next }
+
 /[[:space:]]/ {
   print "Spaces are not allowed at line " NR ": " $0
   exit 1
 }
+
 /=/ {
-  if (NF != 2) {
-    print "Invalid key=value at line " NR
+  pos = index($0, "=")
+  if (pos == 1) {
+    print "Empty key at line " NR
     exit 1
   }
-  key=$1
-  if (index(key,"=")) {
+
+  key = substr($0, 1, pos - 1)
+
+  if (index(key, "=")) {
     print "Invalid key at line " NR
     exit 1
   }
+
   if (seen[key]++) {
     print "Duplicate key: " key
     exit 1
   }
   next
 }
+
 {
   print "Invalid line at " NR ": " $0
   exit 1
@@ -51,40 +59,51 @@ for TARGET in "${TARGETS[@]}"; do
   echo
   echo "🔄 Syncing $TARGET"
 
-  [[ -f "$TARGET" ]] || {
-    awk -F= '!/^[#;]/ {print}' "$DEV" > "$TARGET"
+  if [[ ! -f "$TARGET" ]]; then
+    awk '!/^[#;]/ {print}' "$DEV" > "$TARGET"
     echo "✔ Created $TARGET"
     continue
-  }
+  fi
 
   TMP="$(mktemp)"
 
-  awk -F= '
+  awk '
   NR==FNR {
     if ($0 ~ /^[#;]/) next
-    dev[$1]=$2
-    order[++n]=$1
+
+    pos = index($0, "=")
+    key = substr($0, 1, pos - 1)
+    val = substr($0, pos + 1)
+
+    dev[key] = val
+    order[++n] = key
     next
   }
+
   /^[#;]/ { next }
+
   {
-    target[$1]=$2
+    pos = index($0, "=")
+    key = substr($0, 1, pos - 1)
+    val = substr($0, pos + 1)
+    target[key] = val
   }
+
   END {
-    for (i=1; i<=n; i++) {
-      k=order[i]
+    for (i = 1; i <= n; i++) {
+      k = order[i]
       if (k in target) {
         print k "=" target[k]
-        kept[k]=1
+        kept[k] = 1
       } else {
         print k "=" dev[k]
-        added[k]=1
+        added[k] = 1
       }
     }
 
     for (k in target)
       if (!(k in dev))
-        removed[k]=1
+        removed[k] = 1
 
     print "" > "/dev/stderr"
     for (k in added)   print "➕ Added   : " k > "/dev/stderr"
