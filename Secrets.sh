@@ -10,22 +10,25 @@ echo "Fetching secrets from $SOURCE_KV..."
 
 az keyvault secret list \
   --vault-name "$SOURCE_KV" \
-  --query "[?starts_with(name, '${SRC_PREFIX}')].name" \
+  --query "[].name" \
   -o tsv | while read -r SECRET_NAME; do
+
+    # ✅ Bash prefix check (reliable)
+    if [[ ! "$SECRET_NAME" == ${SRC_PREFIX}* ]]; then
+      continue
+    fi
 
     echo "Processing secret: $SECRET_NAME"
 
-    # Get secret value (base64 safe)
     SECRET_VALUE=$(az keyvault secret show \
       --vault-name "$SOURCE_KV" \
       --name "$SECRET_NAME" \
       --query value \
       -o tsv)
 
-    # Replace prefix
     NEW_SECRET_NAME="${SECRET_NAME/#$SRC_PREFIX/$TGT_PREFIX}"
 
-    echo "Creating secret $NEW_SECRET_NAME in $TARGET_KV"
+    echo "Creating secret: $NEW_SECRET_NAME"
 
     az keyvault secret set \
       --vault-name "$TARGET_KV" \
@@ -35,4 +38,4 @@ az keyvault secret list \
 
 done
 
-echo "✅ Secret migration completed successfully"
+echo "✅ Only dev-* secrets migrated successfully"
