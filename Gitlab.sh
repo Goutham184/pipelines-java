@@ -90,3 +90,76 @@ pages:
     paths:
       - public
 
+
+
+#!/bin/bash
+
+GITLAB_URL="https://gitlab.com/api/v4"
+TOKEN="<TOKEN>"
+GROUP_ID="<GROUP_ID>"
+USER_ID="<USER_ID>"
+
+ENVIRONMENTS=("dev" "qa" "test" "prod")
+
+echo "Fetching projects in group..."
+
+PROJECTS=$(curl -s --header "PRIVATE-TOKEN: $TOKEN" \
+"$GITLAB_URL/groups/$GROUP_ID/projects?per_page=100" | jq -r '.[].id')
+
+for PROJECT_ID in $PROJECTS; do
+  echo "---------------------------------------"
+  echo "Processing Project: $PROJECT_ID"
+
+  for ENV in "${ENVIRONMENTS[@]}"; do
+    echo "Checking environment: $ENV"
+
+    EXISTING=$(curl -s --header "PRIVATE-TOKEN: $TOKEN" \
+"$GITLAB_URL/projects/$PROJECT_ID/protected_environments" | jq -r ".[].name")
+
+    if echo "$EXISTING" | grep -w "$ENV" > /dev/null; then
+      echo "Updating existing environment: $ENV"
+
+      curl --request PUT "$GITLAB_URL/projects/$PROJECT_ID/protected_environments/$ENV" \
+        --header "PRIVATE-TOKEN: $TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "{
+          \"deploy_access_levels\": [
+            {\"access_level\": 30},
+            {\"access_level\": 40}
+          ],
+          \"approval_rules\": [
+            {
+              \"required_approvals\": 1,
+              \"user_ids\": [$USER_ID]
+            }
+          ]
+        }"
+
+    else
+      echo "Creating environment: $ENV"
+
+      curl --request POST "$GITLAB_URL/projects/$PROJECT_ID/protected_environments" \
+        --header "PRIVATE-TOKEN: $TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "{
+          \"name\": \"$ENV\",
+          \"deploy_access_levels\": [
+            {\"access_level\": 30},
+            {\"access_level\": 40}
+          ],
+          \"approval_rules\": [
+            {
+              \"required_approvals\": 1,
+              \"user_ids\": [$USER_ID]
+            }
+          ]
+        }"
+    fi
+
+    echo ""
+  done
+done
+
+echo "Done!"
+      
+
