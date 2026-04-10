@@ -161,5 +161,96 @@ for PROJECT_ID in $PROJECTS; do
 done
 
 echo "Done!"
+
+
+
+
+
+
+#!/bin/bash
+
+set -euo pipefail
+
+GITLAB_URL="https://gitlab.com/api/v4"
+TOKEN="<TOKEN>"
+GROUP_ID="<GROUP_ID>"
+USER_ID="<USER_ID>"
+
+ENVIRONMENTS=("dev" "qa" "test" "prod")
+
+echo "Fetching projects in group..."
+
+PROJECTS=$(curl -s --header "PRIVATE-TOKEN: $TOKEN" \
+"$GITLAB_URL/groups/$GROUP_ID/projects?per_page=100" | jq -r '.[].id')
+
+for PROJECT_ID in $PROJECTS; do
+  echo "---------------------------------------"
+  echo "Processing Project: $PROJECT_ID"
+
+  for ENV in "${ENVIRONMENTS[@]}"; do
+    echo "Checking environment: $ENV"
+
+    ENV_DATA=$(curl -s --header "PRIVATE-TOKEN: $TOKEN" \
+"$GITLAB_URL/projects/$PROJECT_ID/protected_environments/$ENV")
+
+    if echo "$ENV_DATA" | jq -e '.name' >/dev/null 2>&1; then
+      echo "Environment exists: $ENV"
+
+      # 🔍 Check if rule already exists
+      RULE_EXISTS=$(echo "$ENV_DATA" | jq -r \
+        ".approval_rules[]? | select(.required_approvals==1 and (.user_ids | index($USER_ID)))")
+
+      if [[ -n "$RULE_EXISTS" ]]; then
+        echo "✅ Rule already exists. Skipping update..."
+      else
+        echo "⚠️ Rule missing. Updating environment..."
+
+        curl --request PUT "$GITLAB_URL/projects/$PROJECT_ID/protected_environments/$ENV" \
+          --header "PRIVATE-TOKEN: $TOKEN" \
+          --header "Content-Type: application/json" \
+          --data "{
+            \"deploy_access_levels\": [
+              {\"access_level\": 30},
+              {\"access_level\": 40}
+            ],
+            \"approval_rules\": [
+              {
+                \"required_approvals\": 1,
+                \"user_ids\": [$USER_ID]
+              }
+            ]
+          }"
+
+        echo "✅ Updated"
+      fi
+
+    else
+      echo "🚀 Creating environment: $ENV"
+
+      curl --request POST "$GITLAB_URL/projects/$PROJECT_ID/protected_environments" \
+        --header "PRIVATE-TOKEN: $TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "{
+          \"name\": \"$ENV\",
+          \"deploy_access_levels\": [
+            {\"access_level\": 30},
+            {\"access_level\": 40}
+          ],
+          \"approval_rules\": [
+            {
+              \"required_approvals\": 1,
+              \"user_ids\": [$USER_ID]
+            }
+          ]
+        }"
+
+      echo "✅ Created"
+    fi
+
+    echo ""
+  done
+done
+
+echo "Done!"
       
 
